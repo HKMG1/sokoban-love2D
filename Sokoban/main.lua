@@ -45,8 +45,8 @@ function love.load()
         }
     }
 
-    levelIndex = 1
     loadQuad()
+    levelIndex = 1
     loadLevel()
 end
 
@@ -61,18 +61,27 @@ function loadQuad()
     end
 end
 
--- deep copy level
 function loadLevel()
-    level = {}
-    for y, row in ipairs(levels[levelIndex]) do
-        level[y] = {}
-        for x, cell in ipairs(row) do
-            level[y][x] = cell
-        end
-    end
+    level = deepcopy(levels[levelIndex])
 
     undoStack = {}
-    change = {}
+    redoStack = {}
+end
+
+function deepcopy(orig)
+    local copy
+    if type(orig) == 'table' then
+        copy = {}
+        for y, row in ipairs(orig) do
+            copy[y] = {}
+            for x, cell in ipairs(row) do
+                copy[y][x] = cell
+            end
+        end
+    else
+        copy = orig
+    end
+    return copy
 end
 
 function drawMap()
@@ -91,123 +100,134 @@ function drawMap()
     end
 end
 
-function love.keypressed(key)
-    if key == 'up' or key == 'down' or key == 'left' or key == 'right' or key == 'w' or key == 'a' or key == 's' or key == 'd' then
-        local playerX, playerY
-        local dx = 0
-        local dy = 0
+function love.keypressed(key)       
+    local dx = 0
+    local dy = 0
 
-        -- get player position
-        for y, row in ipairs(level) do
-            for x, cell in ipairs(row) do
-                if cell == 4 or cell == 6 then
-                    playerX = x
-                    playerY = y
-                end
-            end
-        end
-
-        -- set player position change
-        if key == 'left' or key == 'a' then
-            dx = -1
-        elseif key == 'right' or key == 'd' then
-            dx = 1
-        elseif key == 'up' or key == 'w' then
-            dy = -1
-        elseif key == 'down' or key == 's' then
-            dy = 1
-        end
-
-        -- get info about surroundings
-        local current = level[playerY][playerX]
-        local adjacent, beyond
-        if level[playerY + dy] and level[playerY + dy][playerX + dx] then
-            adjacent = level[playerY + dy][playerX + dx]
-        end
-        if level[playerY + dy * 2] and level[playerY + dy * 2][playerX + dx * 2] then
-            beyond = level[playerY + dy * 2][playerX + dx * 2]
-        end
-
-        -- define moves
-        local nextAdjacent = {
-            [0] = 4, -- [ > player | ] -> [ | player ]
-            [2] = 6, -- [ > player | target ] -> [ | player target ]
-        }
-        local nextCurrent = {
-            [4] = 0, -- [ > player | ] -> [ | player ]
-            [6] = 2, -- [ > player target | ] -> [ target | player ]
-        }
-        local nextBeyond = {
-            [0] = 3, -- [ > crate | ] -> [ | crate ]
-            [2] = 5, -- [ > crate | target ] -> [ | crate target ]
-        }
-        local nextAdjacentInsert = {
-            [3] = 4, -- [ > crate | ] -> [ | crate ]
-            [5] = 6, -- [ > crate target ] -> [ target | crate ]
-        }
-
-        -- save level
-        change[1] = {playerX, playerY, current}
-        change[2] = {playerX + dx, playerY + dy, adjacent}
-        change[3] = {playerX + dx * 2, playerY + dy * 2, beyond}
-
-        -- implement moves
-        if nextAdjacent[adjacent] then
-            level[playerY][playerX] = nextCurrent[current]
-            level[playerY + dy][playerX + dx] = nextAdjacent[adjacent]
-            saveLevel()
-        elseif nextAdjacentInsert[adjacent] and nextBeyond[beyond] then
-            level[playerY][playerX] = nextCurrent[current]
-            level[playerY + dy][playerX + dx] = nextAdjacentInsert[adjacent]
-            level[playerY + dy * 2][playerX + dx * 2] = nextBeyond[beyond]
-            saveLevel()
-        end
-
-        -- multipush
-        -- [ > movable | crate ] -> [ > movable | > crate ]
-        -- flood fill to find nearest non-crate
-
-        -- check level win
-        -- all crate on target
-        local levelWin = true
-
-        for y, row in ipairs(level) do
-            for x, cell in ipairs(row) do
-                if cell == 2 or cell == 6 then
-                    levelWin = false
-                end
-            end
-        end
-
-        if levelWin then
-            levelIndex = levelIndex + 1
-            if levelIndex > #levels then
-                -- should have ending
-                levelIndex = 1
-            end
-            loadLevel()
-        end
-
-    -- reset level
-    elseif key == 'r' then
-        loadLevel()
-    -- undo level
+    if key == 'left' or key == 'a' then
+        dx = -1
+    elseif key == 'right' or key == 'd' then
+        dx = 1
+    elseif key == 'up' or key == 'w' then
+        dy = -1
+    elseif key == 'down' or key == 's' then
+        dy = 1
+    elseif key == 'r' then 
+        loadLevel() 
+        return
     elseif key == 'z' then
         undoLevel()
+        return
+    elseif key == 'c' then
+        redoLevel()
+        return
+    else 
+        return
     end
+
+    attemptMove(dx, dy)
+    checkWinCondition()
 end
 
 function saveLevel()
-    table.insert(undoStack, change)
-    change = {}
+    table.insert(undoStack, deepcopy(level))
+    redoStack = {}
 end
 
 function undoLevel()
     if #undoStack > 0 then
-        while #undoStack[#undoStack] > 0 do
-            local change = table.remove(undoStack[#undoStack])
-            level[change[2]][change[1]] = change[3]
+        table.insert(redoStack, deepcopy(level))
+        level = table.remove(undoStack)
+    end
+end
+
+function redoLevel()
+    if #redoStack > 0 then
+        table.insert(undoStack, deepcopy(level))
+        level = table.remove(redoStack)
+    end
+end
+
+function attemptMove(dx, dy)
+    -- get forward info
+    local playerX, playerY = getPlayerPosition()
+    local forwardPos = {}
+    for i = 1, 3 do
+        forwardPos[i] = level[playerY + dy * (i - 1)][playerX + dx * (i - 1)]
+    end
+
+    local nextState = getNextState(forwardPos)
+    if nextState then
+        saveLevel()
+
+        -- apply move
+        level[playerY][playerX] = nextState[1]
+        level[playerY + dy][playerX + dx] = nextState[2]
+        if nextState[3] then
+            level[playerY + dy * 2][playerX + dx * 2] = nextState[3]
         end
-        table.remove(undoStack)
+    end
+end
+
+function getPlayerPosition()
+    for y, row in ipairs(level) do
+        for x, cell in ipairs(row) do
+            if cell == 4 or cell == 6 then
+                return x, y
+            end
+        end
+    end
+end
+
+function getNextState(forwardPos)
+    -- define moves
+    local nextAdjacent = {
+        [0] = 4, -- [ > player | ] -> [ | player ]
+        [2] = 6, -- [ > player | target ] -> [ | player target ]
+    }
+    local nextCurrent = {
+        [4] = 0, -- [ > player | ] -> [ | player ]
+        [6] = 2, -- [ > player target | ] -> [ target | player ]
+    }
+    local nextBeyond = {
+        [0] = 3, -- [ > crate | ] -> [ | crate ]
+        [2] = 5, -- [ > crate | target ] -> [ | crate target ]
+    }
+    local nextAdjacentInsert = {
+        [3] = 4, -- [ > crate | ] -> [ | crate ]
+        [5] = 6, -- [ > crate target ] -> [ target | crate ]
+    }
+
+    -- multipush
+    -- [ > movable | crate ] -> [ > movable | > crate ]
+    -- flood fill to find nearest non-crate
+
+    if nextAdjacent[forwardPos[2]] then
+        return {nextCurrent[forwardPos[1]], nextAdjacent[forwardPos[2]], nil}
+    elseif nextAdjacentInsert[forwardPos[2]] and nextBeyond[forwardPos[3]] then
+        return {nextCurrent[forwardPos[1]], nextAdjacentInsert[forwardPos[2]], nextBeyond[forwardPos[3]]}
+    else
+        return nil
+    end
+end
+
+function checkWinCondition()
+    local levelWin = true
+    -- all target on crate
+    for y, row in ipairs(level) do
+        for x, cell in ipairs(row) do
+            if cell == 2 or cell == 6 then
+                levelWin = false
+            end
+        end
+    end
+
+    if levelWin then
+        levelIndex = levelIndex + 1
+        if levelIndex > #levels then
+            -- should have ending
+            levelIndex = 1
+        end
+        loadLevel()
     end
 end
