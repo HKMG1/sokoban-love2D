@@ -1,3 +1,5 @@
+io.stdout:setvbuf("no") -- for debug
+
 -- const
 TileSize = 64
 
@@ -62,20 +64,20 @@ function loadQuad()
 end
 
 function loadLevel()
-    level = deepcopy(levels[levelIndex])
+    level = deepCopy(levels[levelIndex])
 
     undoStack = {}
     redoStack = {}
 end
 
-function deepcopy(orig)
+function deepCopy(orig)
     local copy
     if type(orig) == 'table' then
         copy = {}
         for y, row in ipairs(orig) do
             copy[y] = {}
-            for x, cell in ipairs(row) do
-                copy[y][x] = cell
+            for x, tile in ipairs(row) do
+                copy[y][x] = tile
             end
         end
     else
@@ -86,13 +88,13 @@ end
 
 function drawMap()
     for columnIndex, row in ipairs(level) do
-        for rowIndex, cell in ipairs(row) do
+        for rowIndex, tile in ipairs(row) do
             local x = (rowIndex - 1) * TileSize
             local y = (columnIndex - 1) * TileSize
             love.graphics.draw(tileSet, quads[1], x, y)
-            if cell >= 1 and cell <= 5 then
-                love.graphics.draw(tileSet, quads[cell + 1], x, y)
-            elseif cell == 6 then
+            if tile >= 1 and tile <= 5 then
+                love.graphics.draw(tileSet, quads[tile + 1], x, y)
+            elseif tile == 6 then
                 love.graphics.draw(tileSet, quads[3], x, y)
                 love.graphics.draw(tileSet, quads[5], x, y)
             end
@@ -103,6 +105,9 @@ end
 function love.keypressed(key)       
     local dx = 0
     local dy = 0
+
+    canSave = true
+    canMove = true
 
     if key == 'left' or key == 'a' then
         dx = -1
@@ -125,89 +130,75 @@ function love.keypressed(key)
         return
     end
 
-    attemptMove(dx, dy)
+    playerX, playerY = getPlayerPosition()
+    checkMove(playerX, playerY, dx, dy)
     checkWinCondition()
-end
-
-function saveLevel()
-    table.insert(undoStack, deepcopy(level))
-    redoStack = {}
-end
-
-function undoLevel()
-    if #undoStack > 0 then
-        table.insert(redoStack, deepcopy(level))
-        level = table.remove(undoStack)
-    end
-end
-
-function redoLevel()
-    if #redoStack > 0 then
-        table.insert(undoStack, deepcopy(level))
-        level = table.remove(redoStack)
-    end
-end
-
-function attemptMove(dx, dy)
-    -- get forward info
-    local playerX, playerY = getPlayerPosition()
-    local forwardPos = {}
-    for i = 1, 3 do
-        forwardPos[i] = level[playerY + dy * (i - 1)][playerX + dx * (i - 1)]
-    end
-
-    local nextState = getNextState(forwardPos)
-    if nextState then
-        saveLevel()
-
-        -- apply move
-        level[playerY][playerX] = nextState[1]
-        level[playerY + dy][playerX + dx] = nextState[2]
-        if nextState[3] then
-            level[playerY + dy * 2][playerX + dx * 2] = nextState[3]
-        end
-    end
 end
 
 function getPlayerPosition()
     for y, row in ipairs(level) do
-        for x, cell in ipairs(row) do
-            if cell == 4 or cell == 6 then
+        for x, tile in ipairs(row) do
+            if tile == 4 or tile == 6 then
                 return x, y
             end
         end
     end
 end
 
-function getNextState(forwardPos)
-    -- define moves
-    local nextAdjacent = {
-        [0] = 4, -- [ > player | ] -> [ | player ]
-        [2] = 6, -- [ > player | target ] -> [ | player target ]
-    }
+function checkMove(x, y, dx, dy)
+    local newX = x + dx
+    local newY = y + dy
+    local current = level[y][x]
+    local adjacent = level[newY][newX]
+
+    -- enable this if multipush is not allowed
+    --[[
+    if (current == 3 or current == 5) and (adjacent == 3 or adjacent == 5) then
+        canMove = false
+    end
+    ]]
+
+    if adjacent == 3 or adjacent == 5 then
+        -- call checkMove again with next tile
+        checkMove(newX, newY, dx, dy)
+        -- update adjacent
+        adjacent = level[newY][newX]
+    elseif adjacent == 1 then
+        canMove = false
+    end
+
+    if canMove == false then
+        return
+    end
+
+    if canSave then
+        saveLevel()
+        canSave = false
+    end
+
     local nextCurrent = {
-        [4] = 0, -- [ > player | ] -> [ | player ]
-        [6] = 2, -- [ > player target | ] -> [ target | player ]
+        [4] = 0,
+        [6] = 2
     }
-    local nextBeyond = {
-        [0] = 3, -- [ > crate | ] -> [ | crate ]
-        [2] = 5, -- [ > crate | target ] -> [ | crate target ]
+    local nextAdjacent = {
+        [0] = 4,
+        [2] = 6
     }
-    local nextAdjacentInsert = {
-        [3] = 4, -- [ > crate | ] -> [ | crate ]
-        [5] = 6, -- [ > crate target ] -> [ target | crate ]
+    local nextCurrentPush = {
+        [3] = 0,
+        [5] = 2
+    }
+    local nextAdjacentPush = {
+        [0] = 3,
+        [2] = 5
     }
 
-    -- multipush
-    -- [ > movable | crate ] -> [ > movable | > crate ]
-    -- flood fill to find nearest non-crate
-
-    if nextAdjacent[forwardPos[2]] then
-        return {nextCurrent[forwardPos[1]], nextAdjacent[forwardPos[2]], nil}
-    elseif nextAdjacentInsert[forwardPos[2]] and nextBeyond[forwardPos[3]] then
-        return {nextCurrent[forwardPos[1]], nextAdjacentInsert[forwardPos[2]], nextBeyond[forwardPos[3]]}
-    else
-        return nil
+    if nextCurrent[current] then
+        level[newY][newX] = nextAdjacent[adjacent]
+        level[y][x] = nextCurrent[current]
+    else 
+        level[newY][newX] = nextAdjacentPush[adjacent]
+        level[y][x] = nextCurrentPush[current]
     end
 end
 
@@ -215,8 +206,8 @@ function checkWinCondition()
     local levelWin = true
     -- all target on crate
     for y, row in ipairs(level) do
-        for x, cell in ipairs(row) do
-            if cell == 2 or cell == 6 then
+        for x, tile in ipairs(row) do
+            if tile == 2 or tile == 6 then
                 levelWin = false
             end
         end
@@ -229,5 +220,24 @@ function checkWinCondition()
             levelIndex = 1
         end
         loadLevel()
+    end
+end
+
+function saveLevel()
+    table.insert(undoStack, deepCopy(level))
+    redoStack = {}
+end
+
+function undoLevel()
+    if #undoStack > 0 then
+        table.insert(redoStack, deepCopy(level))
+        level = table.remove(undoStack)
+    end
+end
+
+function redoLevel()
+    if #redoStack > 0 then
+        table.insert(undoStack, deepCopy(level))
+        level = table.remove(redoStack)
     end
 end
