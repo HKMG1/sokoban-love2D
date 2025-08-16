@@ -11,66 +11,62 @@ EnablePull = false
 function love.load()
     tileSet = love.graphics.newImage('/images/sokoban_tilesheet.png')
 
-    -- sprite pos in tilesheet
+    --[[
+    sprite pos in tilesheet:
+    1 = ground
+    2 = wall
+    3 = target
+    4 = crate
+    5 = player
+    6 = crate on target
+    ]] 
     quadInfo = {
-        { 11, 6 }, -- ground
-        { 9, 6 }, -- wall
-        { 0, 3 }, -- target
-        { 1, 0 }, -- crate
-        { 0, 4 }, -- player
-        { 1, 1 }, -- crate on target
+        { 11, 6 },
+        { 9, 6 },
+        { 0, 3 },
+        { 1, 0 },
+        { 0, 4 },
+        { 1, 1 }
     }
 
     --[[ 
-    objects ID:
-    0 = ground
+    background object ID:
+    0 = empty
     1 = wall
     2 = target
-    3 = crate
-    4 = player
-    5 = crate on target
-    6 = player on target
+
+    entity object ID:
+    0 = empty
+    1 = player
+    2 = crate
     ]]
     levels = {
-        -- level 1: 6x7
+        -- level 1
         {
-            { 1, 1, 1, 1, 1, 1 },
-            { 1, 0, 2, 1, 1, 1 },
-            { 1, 0, 0, 1, 1, 1 },
-            { 1, 5, 0, 0, 4, 1 },
-            { 1, 0, 0, 3, 0, 1 },
-            { 1, 0, 0, 1, 1, 1 },
-            { 1, 1, 1, 1, 1, 1 }
-        },
-        -- level 2: 6x7
-        {
-            { 1, 1, 1, 1, 1, 1 },
-            { 1, 0, 0, 0, 0, 1 },
-            { 1, 0, 1, 4, 0, 1 },
-            { 1, 0, 3, 5, 0, 1 },
-            { 1, 0, 2, 5, 0, 1 },
-            { 1, 0, 0, 0, 0, 1 },
-            { 1, 1, 1, 1, 1, 1 }
+            background = {
+                { 1, 1, 1, 1, 1, 1 },
+                { 1, 0, 2, 1, 1, 1 },
+                { 1, 0, 0, 1, 1, 1 },
+                { 1, 2, 0, 0, 0, 1 },
+                { 1, 0, 0, 0, 0, 1 },
+                { 1, 0, 0, 1, 1, 1 },
+                { 1, 1, 1, 1, 1, 1 }
+            },
+            entity = {
+                { 0, 0, 0, 0, 0, 0 },
+                { 0, 0, 0, 0, 0, 0 },
+                { 0, 0, 0, 0, 0, 0 },
+                { 0, 2, 0, 0, 1, 0 },
+                { 0, 0, 0, 2, 0, 0 },
+                { 0, 0, 0, 0, 0, 0 },
+                { 0, 0, 0, 0, 0, 0 }
+            }
         }
     }
 
     loadQuad()
     levelIndex = 1
     loadLevel()
-end
-
-function isObject(id, object)
-    if object == "player" and (id == 4 or id == 6) then
-        return true
-    elseif object == "crate" and (id == 3 or id == 5) then
-        return true
-    elseif object == "target" and (id == 2 or id == 6) then -- target no crate
-        return true
-    elseif object == "wall" and id == 1 then -- may rename as obstacle
-        return true
-    else
-        return false
-    end
 end
 
 function love.draw()
@@ -85,7 +81,10 @@ function loadQuad()
 end
 
 function loadLevel()
-    level = deepCopy(levels[levelIndex])
+    level = { background, entity }
+    level.background = deepCopy(levels[levelIndex].background)
+    level.entity = deepCopy(levels[levelIndex].entity)
+
     offsetX, offsetY = getOffset()
 
     undoStack = {}
@@ -109,23 +108,37 @@ function deepCopy(orig)
 end
 
 function getOffset()
-    levelWidth = #level[1] * TileSize
-    levelHeight = #level * TileSize
-    windowWidth, windowHeight = love.graphics.getDimensions()
+    local levelWidth = #level.background[1] * TileSize
+    local levelHeight = #level.background * TileSize
+    local windowWidth, windowHeight = love.graphics.getDimensions()
     return (windowWidth - levelWidth) * 0.5, (windowHeight - levelHeight) * 0.5
 end
 
 function drawMap()
-    for y, row in ipairs(level) do
+    for y, row in ipairs(level.background) do
         for x, tile in ipairs(row) do
             local i = (x - 1) * TileSize + offsetX
             local j = (y - 1) * TileSize + offsetY
+            local tile2 = level.entity[y][x]
+
             love.graphics.draw(tileSet, quads[1], i, j)
-            if tile >= 1 and tile <= 5 then
-                love.graphics.draw(tileSet, quads[tile + 1], i, j)
-            elseif tile == 6 then
-                love.graphics.draw(tileSet, quads[3], i, j)
-                love.graphics.draw(tileSet, quads[5], i, j)
+            if tile == 0 then
+                if tile2 == 1 then
+                    love.graphics.draw(tileSet, quads[5], i, j)
+                elseif tile2 == 2 then
+                    love.graphics.draw(tileSet, quads[4], i, j)
+                end
+            elseif tile == 1 then
+                love.graphics.draw(tileSet, quads[2], i, j)
+            elseif tile == 2 then
+                if tile2 ~= 2 then
+                    love.graphics.draw(tileSet, quads[3], i, j)
+                    if tile2 == 1 then
+                        love.graphics.draw(tileSet, quads[5], i, j)
+                    end
+                elseif tile2 == 2 then
+                    love.graphics.draw(tileSet, quads[6], i, j)
+                end
             end
         end
     end
@@ -165,9 +178,9 @@ function love.keypressed(key)
 end
 
 function getPlayerPosition()
-    for y, row in ipairs(level) do
+    for y, row in ipairs(level.entity) do
         for x, tile in ipairs(row) do
-            if isObject(tile, "player") then
+            if tile == 1 then
                 return x, y
             end
         end
@@ -177,20 +190,20 @@ end
 function checkMove(x, y, dx, dy)
     local newX = x + dx
     local newY = y + dy
-    local current = level[y][x]
-    local front = level[newY][newX]
-    local behind = level[y - dy][x - dx]
+    local current = level.entity[y][x]
+    local front = level.entity[newY][newX]
+    local behind = level.entity[y - dy][x - dx]
 
     if not EnableMultipush then
-        canMove = not (isObject(current, "crate") and isObject(front, "crate"))
+        canMove = not (current == 2 and front == 2)
     end
 
-    if isObject(front, "crate") then
+    if front == 2 then
         -- call checkMove again with next tile
         checkMove(newX, newY, dx, dy)
         -- update front
-        front = level[newY][newX]
-    elseif isObject(front, "wall") then
+        front = level.entity[newY][newX]
+    elseif level.background[newY][newX] == 1 then
         canMove = false
     end
 
@@ -203,50 +216,25 @@ function checkMove(x, y, dx, dy)
         canSave = false
     end
 
-    local nextCurrent = {
-        [4] = 0,
-        [6] = 2
-    }
-    local nextFront = {
-        [0] = 4,
-        [2] = 6
-    }
-    local nextCurrentPush = {
-        [3] = 0,
-        [5] = 2
-    }
-    local nextFrontPush = {
-        [0] = 3,
-        [2] = 5
-    }
-    local nextCurrentPull = {
-        [4] = 3,
-        [6] = 5
-    }
-    local nextBehindPull = {
-        [3] = 0,
-        [5] = 2
-    }
-
-    if EnablePull and isObject(current, "player") and isObject(behind, "crate") then
-        level[newY][newX] = nextFront[front]
-        level[y][x] = nextCurrentPull[current]
-        level[y - dy][x - dx] = nextBehindPull[behind]
-    elseif isObject(current, "player") then
-        level[newY][newX] = nextFront[front]
-        level[y][x] = nextCurrent[current]
-    elseif isObject(current, "crate") then
-        level[newY][newX] = nextFrontPush[front]
-        level[y][x] = nextCurrentPush[current]
+    if EnablePull and current == 1 and behind == 2 then
+        level.entity[newY][newX] = 1
+        level.entity[y][x] = 2
+        level.entity[y - dy][x - dx] = 0
+    elseif current == 1 then
+        level.entity[newY][newX] = 1
+        level.entity[y][x] = 0
+    elseif current == 2 then
+        level.entity[newY][newX] = 2
+        level.entity[y][x] = 2
     end
 end
 
 function checkWinCondition()
     local levelWin = true
     -- all target on crate
-    for y, row in ipairs(level) do
+    for y, row in ipairs(level.background) do
         for x, tile in ipairs(row) do
-            if isObject(tile, "target") then
+            if tile == 2 and level.entity[y][x] ~= 2 then
                 levelWin = false
             end
         end
@@ -263,20 +251,20 @@ function checkWinCondition()
 end
 
 function saveLevel()
-    table.insert(undoStack, deepCopy(level))
+    table.insert(undoStack, deepCopy(level.entity))
     redoStack = {}
 end
 
 function undoLevel()
     if #undoStack > 0 then
-        table.insert(redoStack, deepCopy(level))
-        level = table.remove(undoStack)
+        table.insert(redoStack, deepCopy(level.entity))
+        level.entity = table.remove(undoStack)
     end
 end
 
 function redoLevel()
     if #redoStack > 0 then
-        table.insert(undoStack, deepCopy(level))
-        level = table.remove(redoStack)
+        table.insert(undoStack, deepCopy(level.entity))
+        level.entity = table.remove(redoStack)
     end
 end
