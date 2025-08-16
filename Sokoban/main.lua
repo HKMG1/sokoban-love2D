@@ -4,6 +4,10 @@ io.stdout:setvbuf("no")
 -- const
 TileSize = 64
 
+-- feature
+EnableMultipush = false
+EnablePull = false
+
 function love.load()
     tileSet = love.graphics.newImage('/images/sokoban_tilesheet.png')
 
@@ -82,6 +86,7 @@ end
 
 function loadLevel()
     level = deepCopy(levels[levelIndex])
+    offsetX, offsetY = getOffset()
 
     undoStack = {}
     redoStack = {}
@@ -103,11 +108,18 @@ function deepCopy(orig)
     return copy
 end
 
+function getOffset()
+    levelWidth = #level[1] * TileSize
+    levelHeight = #level * TileSize
+    windowWidth, windowHeight = love.graphics.getDimensions()
+    return (windowWidth - levelWidth) * 0.5, (windowHeight - levelHeight) * 0.5
+end
+
 function drawMap()
     for y, row in ipairs(level) do
         for x, tile in ipairs(row) do
-            local i = (x - 1) * TileSize
-            local j = (y - 1) * TileSize
+            local i = (x - 1) * TileSize + offsetX
+            local j = (y - 1) * TileSize + offsetY
             love.graphics.draw(tileSet, quads[1], i, j)
             if tile >= 1 and tile <= 5 then
                 love.graphics.draw(tileSet, quads[tile + 1], i, j)
@@ -166,21 +178,19 @@ function checkMove(x, y, dx, dy)
     local newX = x + dx
     local newY = y + dy
     local current = level[y][x]
-    local adjacent = level[newY][newX]
+    local front = level[newY][newX]
+    local behind = level[y - dy][x - dx]
 
-    -- enable this if multipush is not allowed
-    --[[
-    if isObject(current, "crate") and isObject(adjacent, "crate") then
-        canMove = false
+    if not EnableMultipush then
+        canMove = not (isObject(current, "crate") and isObject(front, "crate"))
     end
-    ]]
 
-    if isObject(adjacent, "crate") then
+    if isObject(front, "crate") then
         -- call checkMove again with next tile
         checkMove(newX, newY, dx, dy)
-        -- update adjacent
-        adjacent = level[newY][newX]
-    elseif isObject(adjacent, "wall") then
+        -- update front
+        front = level[newY][newX]
+    elseif isObject(front, "wall") then
         canMove = false
     end
 
@@ -197,7 +207,7 @@ function checkMove(x, y, dx, dy)
         [4] = 0,
         [6] = 2
     }
-    local nextAdjacent = {
+    local nextFront = {
         [0] = 4,
         [2] = 6
     }
@@ -205,16 +215,28 @@ function checkMove(x, y, dx, dy)
         [3] = 0,
         [5] = 2
     }
-    local nextAdjacentPush = {
+    local nextFrontPush = {
         [0] = 3,
         [2] = 5
     }
+    local nextCurrentPull = {
+        [4] = 3,
+        [6] = 5
+    }
+    local nextBehindPull = {
+        [3] = 0,
+        [5] = 2
+    }
 
-    if isObject(current, "player") then
-        level[newY][newX] = nextAdjacent[adjacent]
+    if EnablePull and isObject(current, "player") and isObject(behind, "crate") then
+        level[newY][newX] = nextFront[front]
+        level[y][x] = nextCurrentPull[current]
+        level[y - dy][x - dx] = nextBehindPull[behind]
+    elseif isObject(current, "player") then
+        level[newY][newX] = nextFront[front]
         level[y][x] = nextCurrent[current]
     elseif isObject(current, "crate") then
-        level[newY][newX] = nextAdjacentPush[adjacent]
+        level[newY][newX] = nextFrontPush[front]
         level[y][x] = nextCurrentPush[current]
     end
 end
