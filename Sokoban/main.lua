@@ -1,4 +1,5 @@
-io.stdout:setvbuf("no") -- for debug
+-- for debug
+io.stdout:setvbuf("no")
 
 -- const
 TileSize = 64
@@ -16,14 +17,16 @@ function love.load()
         { 1, 1 }, -- crate on target
     }
 
-    -- objects ID
-    -- 0 = ground
-    -- 1 = wall
-    -- 2 = target
-    -- 3 = crate
-    -- 4 = player
-    -- 5 = crate on target
-    -- 6 = player on target
+    --[[ 
+    objects ID:
+    0 = ground
+    1 = wall
+    2 = target
+    3 = crate
+    4 = player
+    5 = crate on target
+    6 = player on target
+    ]]
     levels = {
         -- level 1: 6x7
         {
@@ -50,6 +53,20 @@ function love.load()
     loadQuad()
     levelIndex = 1
     loadLevel()
+end
+
+function isObject(id, object)
+    if object == "player" and (id == 4 or id == 6) then
+        return true
+    elseif object == "crate" and (id == 3 or id == 5) then
+        return true
+    elseif object == "target" and (id == 2 or id == 6) then -- target no crate
+        return true
+    elseif object == "wall" and id == 1 then -- may rename as obstacle
+        return true
+    else
+        return false
+    end
 end
 
 function love.draw()
@@ -87,16 +104,16 @@ function deepCopy(orig)
 end
 
 function drawMap()
-    for columnIndex, row in ipairs(level) do
-        for rowIndex, tile in ipairs(row) do
-            local x = (rowIndex - 1) * TileSize
-            local y = (columnIndex - 1) * TileSize
-            love.graphics.draw(tileSet, quads[1], x, y)
+    for y, row in ipairs(level) do
+        for x, tile in ipairs(row) do
+            local i = (x - 1) * TileSize
+            local j = (y - 1) * TileSize
+            love.graphics.draw(tileSet, quads[1], i, j)
             if tile >= 1 and tile <= 5 then
-                love.graphics.draw(tileSet, quads[tile + 1], x, y)
+                love.graphics.draw(tileSet, quads[tile + 1], i, j)
             elseif tile == 6 then
-                love.graphics.draw(tileSet, quads[3], x, y)
-                love.graphics.draw(tileSet, quads[5], x, y)
+                love.graphics.draw(tileSet, quads[3], i, j)
+                love.graphics.draw(tileSet, quads[5], i, j)
             end
         end
     end
@@ -130,7 +147,7 @@ function love.keypressed(key)
         return
     end
 
-    playerX, playerY = getPlayerPosition()
+    local playerX, playerY = getPlayerPosition()
     checkMove(playerX, playerY, dx, dy)
     checkWinCondition()
 end
@@ -138,7 +155,7 @@ end
 function getPlayerPosition()
     for y, row in ipairs(level) do
         for x, tile in ipairs(row) do
-            if tile == 4 or tile == 6 then
+            if isObject(tile, "player") then
                 return x, y
             end
         end
@@ -153,17 +170,17 @@ function checkMove(x, y, dx, dy)
 
     -- enable this if multipush is not allowed
     --[[
-    if (current == 3 or current == 5) and (adjacent == 3 or adjacent == 5) then
+    if isObject(current, "crate") and isObject(adjacent, "crate") then
         canMove = false
     end
     ]]
 
-    if adjacent == 3 or adjacent == 5 then
+    if isObject(adjacent, "crate") then
         -- call checkMove again with next tile
         checkMove(newX, newY, dx, dy)
         -- update adjacent
         adjacent = level[newY][newX]
-    elseif adjacent == 1 then
+    elseif isObject(adjacent, "wall") then
         canMove = false
     end
 
@@ -193,10 +210,10 @@ function checkMove(x, y, dx, dy)
         [2] = 5
     }
 
-    if nextCurrent[current] then
+    if isObject(current, "player") then
         level[newY][newX] = nextAdjacent[adjacent]
         level[y][x] = nextCurrent[current]
-    else 
+    elseif isObject(current, "crate") then
         level[newY][newX] = nextAdjacentPush[adjacent]
         level[y][x] = nextCurrentPush[current]
     end
@@ -207,7 +224,7 @@ function checkWinCondition()
     -- all target on crate
     for y, row in ipairs(level) do
         for x, tile in ipairs(row) do
-            if tile == 2 or tile == 6 then
+            if isObject(tile, "target") then
                 levelWin = false
             end
         end
