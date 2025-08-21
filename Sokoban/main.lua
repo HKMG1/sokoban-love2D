@@ -2,23 +2,36 @@ io.stdout:setvbuf("no")
 
 TileSize = 64
 
-EnableMultipush = true
-EnablePull = true
+EnableMultipush = false
+EnablePull = false
 
 function love.load()
     tileSet = love.graphics.newImage('/images/sokoban_tilesheet.png')
     windowWidth, windowHeight = love.graphics.getDimensions()
 
+    quadCoord = getQuadData()
+    loadQuad()
+
+    levels = getLevelData()
+    levelIndex = 1
+    loadLevel()
+end
+
+function love.draw()
+    drawMap()
+end
+
+function getQuadData()
     --[[
-    sprite pos in tilesheet:
+    sprites:
     1 = ground
     2 = wall
     3 = target
     4 = crate
     5 = player
     6 = crate on target
-    ]] 
-    quadInfo = {
+    ]]
+    return {
         { 11, 6 },
         { 9, 6 },
         { 0, 3 },
@@ -26,7 +39,9 @@ function love.load()
         { 0, 4 },
         { 1, 1 }
     }
+end
 
+function getLevelData()
     --[[ 
     background object ID:
     0 = empty
@@ -38,7 +53,7 @@ function love.load()
     1 = player
     2 = crate
     ]]
-    levels = {
+    return {
         -- level 1
         {
             background = {
@@ -61,19 +76,11 @@ function love.load()
             }
         }
     }
-
-    loadQuad()
-    levelIndex = 1
-    loadLevel()
-end
-
-function love.draw()
-    drawMap()
 end
 
 function loadQuad()
     quads = {}
-    for i, coord in ipairs(quadInfo) do
+    for i, coord in ipairs(quadCoord) do
         quads[i] = love.graphics.newQuad(coord[1] * TileSize, coord[2] * TileSize, TileSize, TileSize, tileSet:getDimensions())
     end
 end
@@ -116,27 +123,82 @@ function drawMap()
             local j = (y - 1) * TileSize + offsetY
             local tile = level.entity[y][x]
 
-            love.graphics.draw(tileSet, quads[1], i, j)
-            if bgtile == 0 then
-                if tile == 1 then
-                    love.graphics.draw(tileSet, quads[5], i, j)
-                elseif tile == 2 then
-                    love.graphics.draw(tileSet, quads[4], i, j)
-                end
-            elseif bgtile == 1 then
-                love.graphics.draw(tileSet, quads[2], i, j)
-            elseif bgtile == 2 then
-                if tile < 2 then
-                    love.graphics.draw(tileSet, quads[3], i, j)
-                    if tile == 1 then
-                        love.graphics.draw(tileSet, quads[5], i, j)
-                    end
-                elseif tile == 2 then
-                    love.graphics.draw(tileSet, quads[6], i, j)
-                end
+            drawGround(i, j)
+            if isWall(bgtile, tile) then
+                drawWall(i, j)
+            elseif isTarget(bgtile, tile) then
+                drawTarget(i, j)
+            elseif isPlayer(bgtile, tile) then
+                drawPlayer(i, j)
+            elseif isPlayerOnTarget(bgtile, tile) then
+                drawPlayerOnTarget(i, j)
+            elseif isCrate(bgtile, tile) then
+                drawCrate(i, j)
+            elseif isCrateOnTarget(bgtile, tile) then
+                drawCrateOnTarget(i, j)
             end
         end
     end
+end
+
+function isWall(id1, id2)
+    return id1 == 1
+end
+
+function isTarget(id1, id2)
+    id2 = id2 or 0
+    return id1 == 2 and id2 == 0
+end
+
+function isPlayer(id1, id2)
+    id1 = id1 or 0
+    return id1 == 0 and id2 == 1
+end
+
+function isPlayerOnTarget(id1, id2)
+    return id1 == 2 and id2 == 1
+end
+
+function isCrate(id1, id2)
+    id1 = id1 or 0
+    return id1 == 0 and id2 == 2
+end
+
+function isCrateOnTarget(id1, id2)
+    return id1 == 2 and id2 == 2
+end
+
+function isTargetNoCrate(id1, id2)
+    return isTarget(id1, id2) or isPlayerOnTarget(id1, id2)
+end
+
+function drawGround(x, y)
+    love.graphics.draw(tileSet, quads[1], x, y)
+end
+
+function drawWall(x, y)
+    love.graphics.draw(tileSet, quads[2], x, y)
+end
+
+function drawTarget(x, y)
+    love.graphics.draw(tileSet, quads[3], x, y)
+end
+
+function drawPlayer(x, y)
+    love.graphics.draw(tileSet, quads[5], x, y)
+end
+
+function drawPlayerOnTarget(x, y)
+    drawTarget(x, y)
+    drawPlayer(x, y)
+end
+
+function drawCrate(x, y)
+    love.graphics.draw(tileSet, quads[4], x, y)
+end
+
+function drawCrateOnTarget(x, y)
+    love.graphics.draw(tileSet, quads[6], x, y)
 end
 
 function love.keypressed(key)       
@@ -160,6 +222,9 @@ function love.keypressed(key)
     elseif key == 'c' then
         redoLevel()
         return
+    elseif key == 'n' then
+        nextLevel()
+        return
     else 
         return
     end
@@ -171,19 +236,23 @@ function love.keypressed(key)
     if not canMove then
         undoLevel()
     end
-    checkWinCondition()
+    if isLevelWin() then
+        nextLevel()
+    end
 end
 
 function getPlayerPosition()
     for y, row in ipairs(level.entity) do
         for x, tile in ipairs(row) do
-            if tile == 1 then
+            if isPlayer(nil, tile) then
                 return x, y
             end
         end
     end
 end
 
+-- need to refactor
+-- attemptMove and applyMove
 function checkMove(x, y, dx, dy)
     local newX = x + dx
     local newY = y + dy
@@ -196,52 +265,54 @@ function checkMove(x, y, dx, dy)
         behind = level.entity[y - dy][x - dx]
     end
 
+    -- attempt move
     if not EnableMultipush then
-        canMove = not (current == 2 and front == 2)
+        canMove = not (isCrate(nil, current) and isCrate(nil, front))
     end
 
-    if front == 2 then
+    if isCrate(nil, front) then
         checkMove(newX, newY, dx, dy)
         front = level.entity[newY][newX]
-    elseif level.background[newY][newX] == 1 then
+    elseif isWall(level.background[newY][newX], nil) then
         canMove = false
     end
 
-    if canMove == false then
+    if not canMove then
         return
     end
 
-    if EnablePull and current == 1 and behind == 2 then
+    -- apply move
+    if EnablePull and isPlayer(nil, current) and isCrate(nil, behind) then
         level.entity[newY][newX] = 1
         level.entity[y][x] = 2
         level.entity[y - dy][x - dx] = 0
-    elseif current == 1 then
+    elseif isPlayer(nil, current) then
         level.entity[newY][newX] = 1
         level.entity[y][x] = 0
-    elseif current == 2 then
+    elseif isCrate(nil, current) then
         level.entity[newY][newX] = 2
         level.entity[y][x] = 2
     end
 end
 
-function checkWinCondition()
-    local levelWin = true
-    -- all target on crate
+function isLevelWin()
     for y, row in ipairs(level.background) do
-        for x, tile in ipairs(row) do
-            if tile == 2 and level.entity[y][x] ~= 2 then
-                levelWin = false
+        for x, bgtile in ipairs(row) do
+            tile = level.entity[y][x]
+            if isTargetNoCrate(bgtile, tile) then
+                return false
             end
         end
     end
+    return true
+end
 
-    if levelWin then
-        levelIndex = levelIndex + 1
-        if levelIndex > #levels then
-            levelIndex = 1
-        end
-        loadLevel()
+function nextLevel()
+    levelIndex = levelIndex + 1
+    if levelIndex > #levels then
+        levelIndex = 1
     end
+    loadLevel()
 end
 
 function saveLevel()
