@@ -1,15 +1,13 @@
--- for debug
 io.stdout:setvbuf("no")
 
--- const
 TileSize = 64
 
--- feature
-EnableMultipush = false
-EnablePull = false
+EnableMultipush = true
+EnablePull = true
 
 function love.load()
     tileSet = love.graphics.newImage('/images/sokoban_tilesheet.png')
+    windowWidth, windowHeight = love.graphics.getDimensions()
 
     --[[
     sprite pos in tilesheet:
@@ -45,19 +43,19 @@ function love.load()
         {
             background = {
                 { 1, 1, 1, 1, 1, 1 },
-                { 1, 0, 2, 1, 1, 1 },
-                { 1, 0, 0, 1, 1, 1 },
-                { 1, 2, 0, 0, 0, 1 },
                 { 1, 0, 0, 0, 0, 1 },
-                { 1, 0, 0, 1, 1, 1 },
+                { 1, 0, 2, 2, 0, 1 },
+                { 1, 0, 0, 0, 0, 1 },
+                { 1, 0, 0, 0, 0, 1 },
+                { 1, 2, 0, 0, 0, 1 },
                 { 1, 1, 1, 1, 1, 1 }
             },
             entity = {
                 { 0, 0, 0, 0, 0, 0 },
                 { 0, 0, 0, 0, 0, 0 },
-                { 0, 0, 0, 0, 0, 0 },
-                { 0, 2, 0, 0, 1, 0 },
-                { 0, 0, 0, 2, 0, 0 },
+                { 0, 0, 2, 0, 0, 0 },
+                { 0, 0, 0, 0, 2, 0 },
+                { 0, 0, 0, 1, 0, 0 },
                 { 0, 0, 0, 0, 0, 0 },
                 { 0, 0, 0, 0, 0, 0 }
             }
@@ -75,8 +73,8 @@ end
 
 function loadQuad()
     quads = {}
-    for i, info in ipairs(quadInfo) do
-        quads[i] = love.graphics.newQuad(info[1] * TileSize, info[2] * TileSize, TileSize, TileSize, tileSet:getDimensions())
+    for i, coord in ipairs(quadInfo) do
+        quads[i] = love.graphics.newQuad(coord[1] * TileSize, coord[2] * TileSize, TileSize, TileSize, tileSet:getDimensions())
     end
 end
 
@@ -85,7 +83,11 @@ function loadLevel()
     level.background = deepCopy(levels[levelIndex].background)
     level.entity = deepCopy(levels[levelIndex].entity)
 
-    offsetX, offsetY = getOffset()
+    levelHeight = #level.background
+    levelWidth = #level.background[1]
+
+    offsetX = (windowWidth - levelWidth * TileSize) * 0.5
+    offsetY = (windowHeight - levelHeight * TileSize) * 0.5
 
     undoStack = {}
     redoStack = {}
@@ -107,36 +109,29 @@ function deepCopy(orig)
     return copy
 end
 
-function getOffset()
-    local levelWidth = #level.background[1] * TileSize
-    local levelHeight = #level.background * TileSize
-    local windowWidth, windowHeight = love.graphics.getDimensions()
-    return (windowWidth - levelWidth) * 0.5, (windowHeight - levelHeight) * 0.5
-end
-
 function drawMap()
     for y, row in ipairs(level.background) do
-        for x, tile in ipairs(row) do
+        for x, bgtile in ipairs(row) do
             local i = (x - 1) * TileSize + offsetX
             local j = (y - 1) * TileSize + offsetY
-            local tile2 = level.entity[y][x]
+            local tile = level.entity[y][x]
 
             love.graphics.draw(tileSet, quads[1], i, j)
-            if tile == 0 then
-                if tile2 == 1 then
+            if bgtile == 0 then
+                if tile == 1 then
                     love.graphics.draw(tileSet, quads[5], i, j)
-                elseif tile2 == 2 then
+                elseif tile == 2 then
                     love.graphics.draw(tileSet, quads[4], i, j)
                 end
-            elseif tile == 1 then
+            elseif bgtile == 1 then
                 love.graphics.draw(tileSet, quads[2], i, j)
-            elseif tile == 2 then
-                if tile2 ~= 2 then
+            elseif bgtile == 2 then
+                if tile < 2 then
                     love.graphics.draw(tileSet, quads[3], i, j)
-                    if tile2 == 1 then
+                    if tile == 1 then
                         love.graphics.draw(tileSet, quads[5], i, j)
                     end
-                elseif tile2 == 2 then
+                elseif tile == 2 then
                     love.graphics.draw(tileSet, quads[6], i, j)
                 end
             end
@@ -147,9 +142,6 @@ end
 function love.keypressed(key)       
     local dx = 0
     local dy = 0
-
-    canSave = true
-    canMove = true
 
     if key == 'left' or key == 'a' then
         dx = -1
@@ -173,7 +165,12 @@ function love.keypressed(key)
     end
 
     local playerX, playerY = getPlayerPosition()
+    canMove = true
+    saveLevel()
     checkMove(playerX, playerY, dx, dy)
+    if not canMove then
+        undoLevel()
+    end
     checkWinCondition()
 end
 
@@ -191,17 +188,20 @@ function checkMove(x, y, dx, dy)
     local newX = x + dx
     local newY = y + dy
     local current = level.entity[y][x]
-    local front = level.entity[newY][newX]
-    local behind = level.entity[y - dy][x - dx]
+    local front, behind
+    if level.entity[newY] and level.entity[newY][newX] then
+        front = level.entity[newY][newX]
+    end
+    if EnablePull and level.entity[y - dy] and level.entity[y - dy][x - dx] then
+        behind = level.entity[y - dy][x - dx]
+    end
 
     if not EnableMultipush then
         canMove = not (current == 2 and front == 2)
     end
 
     if front == 2 then
-        -- call checkMove again with next tile
         checkMove(newX, newY, dx, dy)
-        -- update front
         front = level.entity[newY][newX]
     elseif level.background[newY][newX] == 1 then
         canMove = false
@@ -209,11 +209,6 @@ function checkMove(x, y, dx, dy)
 
     if canMove == false then
         return
-    end
-
-    if canSave then
-        saveLevel()
-        canSave = false
     end
 
     if EnablePull and current == 1 and behind == 2 then
@@ -243,7 +238,6 @@ function checkWinCondition()
     if levelWin then
         levelIndex = levelIndex + 1
         if levelIndex > #levels then
-            -- should have ending
             levelIndex = 1
         end
         loadLevel()
